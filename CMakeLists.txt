@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(WITH_NVIDIA      "Enable NVIDIA GPU support"     OFF)
 option(WITH_ILUVATAR    "Enable ILUVATAR GPU support"   OFF)
 option(WITH_METAX       "Enable MetaX GPU support"      OFF)
+option(WITH_MARS        "Enable Mars GPU support"       OFF)
 option(WITH_MOORE       "Enable Moore GPU support"      OFF)
 option(WITH_CAMBRICON   "Enable Cambricon MLU support"  OFF)
 option(WITH_HYGON       "Enable Hygon DCU support"      OFF)
@@ -25,6 +26,7 @@ option(WITH_OMPI "Enable OpenMPI backend" OFF)
 option(WITH_MPICH "Enable MPICH backend" OFF)
 option(WITH_NCCL "Enable NCCL backend"    OFF)
 option(WITH_MCCL "Enable MCCL backend"    OFF)
+option(WITH_HCCL "Enable HCCL backend"    OFF)
 
 # =========================================================
 # --- MISC. BUILD OPTIONS ---
@@ -97,8 +99,11 @@ if(AUTO_DETECT_DEVICES)
         message(STATUS "Iluvatar environment not detected.")
     endif()
 
-    # MetaX
-    if(DEFINED ENV{MACA_PATH})
+    # Mars (HPCC toolkit)
+    if(DEFINED ENV{HPCC_PATH})
+        set(WITH_MARS ON)
+        message(STATUS "Auto-detected Mars environment from `HPCC_PATH`")
+    elseif(DEFINED ENV{MACA_PATH})
         set(WITH_METAX ON)
         message(STATUS "Auto-detected MetaX environment from `MACA_PATH`")
     else()
@@ -309,10 +314,29 @@ if(AUTO_DETECT_BACKENDS)
     else()
         message(STATUS "No suitable device environment, skipping MCCL detection.")
     endif()
+
+    # Detect HCCL Dependencies (Mars / HPCC)
+    if(WITH_MARS)
+        set(_HCCL_HINTS)
+        if(DEFINED ENV{HPCC_PATH})
+            list(APPEND _HCCL_HINTS "$ENV{HPCC_PATH}")
+        endif()
+        list(APPEND _HCCL_HINTS /opt/hpcc)
+
+        find_path(AUTO_HCCL_INC NAMES hccl.h HINTS ${_HCCL_HINTS} PATH_SUFFIXES include QUIET)
+        find_library(AUTO_HCCL_LIB NAMES hccl HINTS ${_HCCL_HINTS} PATH_SUFFIXES lib lib64 QUIET)
+
+        if(AUTO_HCCL_INC AND AUTO_HCCL_LIB)
+            set(WITH_HCCL ON)
+            message(STATUS "Auto-detected HCCL backend.")
+        else()
+            message(STATUS "HCCL library/headers not found in HPCC paths.")
+        endif()
+    endif()
 endif()
 
 # Fallback: If no backends are enabled or auto-detected, fall back to OpenMPI as the default bootstrap profile.
-if(NOT WITH_OMPI AND NOT WITH_MPICH AND NOT WITH_NCCL AND NOT WITH_MCCL)
+if(NOT WITH_OMPI AND NOT WITH_MPICH AND NOT WITH_NCCL AND NOT WITH_MCCL AND NOT WITH_HCCL)
     set(WITH_OMPI ON)
     message(STATUS "No backend specified or detected. Defaulting to `WITH_OMPI=ON`")
 endif()
@@ -365,6 +389,26 @@ if(WITH_METAX)
     link_directories("${MACA_PATH}/lib")
 
     find_library(MACA_RUNTIME_LIB NAMES mcruntime HINTS "${MACA_PATH}/lib" REQUIRED)
+endif()
+
+if(WITH_MARS)
+    set(HPCC_PATH $ENV{HPCC_PATH})
+    if(NOT HPCC_PATH)
+        set(HPCC_PATH "/opt/hpcc")
+        message(WARNING "HPCC_PATH environment variable not set. Defaulting to /opt/hpcc/. Please verify this path is correct.")
+    endif()
+
+    get_filename_component(HTCC_WRAPPER_ABS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/devices/htcc_wrapper.sh" ABSOLUTE)
+    file(CHMOD "${HTCC_WRAPPER_ABS}"
+     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    set(CMAKE_C_COMPILER   "${HTCC_WRAPPER_ABS}")
+    set(CMAKE_CXX_COMPILER "${HTCC_WRAPPER_ABS}")
+
+    include_directories("${HPCC_PATH}/include")
+    include_directories("${HPCC_PATH}/tools/cu-bridge/include")
+    link_directories("${HPCC_PATH}/lib")
+
+    find_library(HPCC_RUNTIME_LIB NAMES hcruntime HINTS "${HPCC_PATH}/lib" REQUIRED)
 endif()
 
 if(WITH_MOORE)  
@@ -497,6 +541,26 @@ if(WITH_MCCL)
     find_path(MCCL_INC NAMES mccl.h HINTS ${_MCCL_HINTS} PATH_SUFFIXES include REQUIRED)
 
     include_directories(${MCCL_INC})
+endif()
+
+if(WITH_HCCL)
+    if (NOT WITH_MARS)
+        message(FATAL_ERROR "HCCL backend requires Mars GPU support. Please enable `WITH_MARS`.")
+    endif()
+
+    set(_HCCL_HINTS)
+    if(HPCC_PATH)
+        list(APPEND _HCCL_HINTS "${HPCC_PATH}")
+    endif()
+    if(DEFINED ENV{HPCC_PATH})
+        list(APPEND _HCCL_HINTS "$ENV{HPCC_PATH}")
+    endif()
+    list(APPEND _HCCL_HINTS /opt/hpcc)
+
+    find_library(HCCL_LIB NAMES hccl HINTS ${_HCCL_HINTS} PATH_SUFFIXES lib lib64 REQUIRED)
+    find_path(HCCL_INC NAMES hccl.h HINTS ${_HCCL_HINTS} PATH_SUFFIXES include REQUIRED)
+
+    include_directories(${HCCL_INC})
 endif()
 
 # Python is required for code generation.

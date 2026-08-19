@@ -115,6 +115,26 @@ if(WITH_METAX)
     target_compile_options(infiniccl PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-x maca>)
 endif()
 
+# Mars
+if(WITH_MARS)
+    list(APPEND DEVICE_LIST "mars")
+
+    set(MARS_PATTERNS
+        "devices/cuda/*.cc"
+        "devices/cuda/*.cpp"
+        "devices/mars/*.cc"
+        "devices/mars/*.cpp"
+        "devices/mars/*.cu"
+    )
+    file(GLOB MARS_SOURCES ${MARS_PATTERNS})
+
+    set_source_files_properties(${MARS_SOURCES} PROPERTIES LANGUAGE CXX)
+
+    target_sources(infiniccl PRIVATE ${MARS_SOURCES})
+    target_include_directories(infiniccl PRIVATE "${HPCC_PATH}/include")
+    target_link_libraries(infiniccl PRIVATE ${HPCC_RUNTIME_LIB})
+endif()
+
 # Mthreads (Moore)
 if(WITH_MOORE)
     list(APPEND DEVICE_LIST "moore")
@@ -276,6 +296,16 @@ if(WITH_MCCL)
     target_sources(infiniccl PRIVATE ${MCCL_SRCS})
     target_include_directories(infiniccl PRIVATE ${MCCL_INC})
     target_link_libraries(infiniccl PRIVATE ${MCCL_LIB})
+endif()
+
+# HCCL
+if(WITH_HCCL)
+    list(APPEND BACKEND_LIST "hccl")
+    file(GLOB_RECURSE HCCL_SRCS "backends/ccl/hccl/*.cc" "backends/ccl/hccl/*.cpp" "backends/ccl/hccl/*.cu")
+
+    target_sources(infiniccl PRIVATE ${HCCL_SRCS})
+    target_include_directories(infiniccl PRIVATE ${HCCL_INC})
+    target_link_libraries(infiniccl PRIVATE ${HCCL_LIB})
 endif()
 
 # =========================================================
